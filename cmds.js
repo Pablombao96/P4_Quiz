@@ -82,7 +82,7 @@ exports.testCmd=(rl, id)  => {
                 rl.prompt();
             });
         } catch(error){
-            errorlog(error.message);
+            out.errorlog(error.message);
             rl.prompt();
         }
     }
