@@ -1,3 +1,4 @@
+
 const model = require('./model');
 const out= require("./out");
 
@@ -40,52 +41,63 @@ exports.addCmd = rl => {
 };
 
 exports.listCmd = rl => {
-	model.getAll().forEach((quiz, id) => {
-		out.log(`  [${out.colorize(id, 'magenta')}]: ${quiz.question}`);
 	
-	});
-	rl.prompt();
-};
-
-exports.showCmd = (rl, id) => {
-	
-	if (typeof id === "undefined") {
-		out.errorlog(`Falta el parámetro id.`);
-	} else {
-		try {
-			const quiz = model.getByIndex(id);
-			out.log(` [${out.colorize(id, 'magenta')}]:  ${quiz.question} ${out.colorize('=>', 'magenta')}  ${quiz.answer}`);
-		} catch(error) {
-			out.errorlog(error.message);
-		}
-	}
-	
-	rl.prompt();
-};
-
-exports.testCmd=(rl, id)  => {
-	
-	if (typeof id==="undefined") {
-		out.errorlog(`Falta el parámetro id.`);
+	model.models.quiz.findAll()
+	.each(quiz => {
+		out.log(`  [${out.colorize(quiz.id, 'magenta')}]: ${quiz.question}`);	
+	})
+	.catch(error => {
+		out.errorlog(error.message);
+	})
+	.then(() => {
 		rl.prompt();
-	} else {
-		try {
-			const quiz = model.getByIndex(id);
-			rl.question(`${out.colorize(quiz.question, 'red')} `, question => {     
-         	if(question.toLowerCase().trim() === quiz.answer.toLowerCase()){
-            	out.log("Su respuesta es correcta");
-               out.biglog('CORRECTA','green');
-                }else{
-                	out.log("Su respuesta es incorrecta");
-                  out. biglog('INCORRECTA', 'red');
-                }
-                rl.prompt();
-            });
-        } catch(error){
-            out.errorlog(error.message);
-            rl.prompt();
-        }
-    }
+		});
+};
+const validateId = id => {
+	return new Promise((resolve, reject) => {
+		if ( typeof id === "undefined") {
+			reject(new Error(`Falta el parámetro <id>.`));
+			} else {
+				id = parseInt(id);
+				if (Number.isNaN(id)) {
+					reject (new Error(`El parámetro <id> no es válido.`));
+				} else {
+					resolve(id);
+				}
+			}
+		});
+	};
+		
+exports.testCmd = (rl,id) =>{
+validateId(id)
+        .then(id => model.models.quiz.findById(id))
+        .then(quiz => {
+            if (!quiz){
+                throw new Error(`No existe un quiz asociado al id=${id}.`);
+            }
+           return makeQuestion(rl,quiz.question)
+                .then (answer => {
+                    if (answer.toLowerCase().trim() === quiz.answer.toLowerCase()) {
+                        out.log(`Su respuesta es correcta.`);
+                        out.biglog('Correcta', 'green');
+                    } else {
+                        out.log(`Su respuesta es incorrecta.`);
+                        out.biglog('Incorrecta', 'red');
+                    }
+                    ;
+                });
+        })
+               .catch(Sequelize.ValidationError, error =>{
+                   out.errorlog('El quiz es erróneo:');
+                    error.errors.forEach((message) => errorlog(message));
+                })
+                .catch(error =>{
+                    out.errorlog(error.message);
+                })
+                .then(() => {
+                    rl.prompt();
+                });
+
 };
 
 exports.playCmd = rl => {
@@ -98,37 +110,52 @@ exports.playCmd = rl => {
         toBeResolved[i] = i;
     }
 
-    const playOne = () => {
-        if (toBeResolved.length === 0) {
-            out.log("No hay más preguntas");
-            out.log("Su resultado: " + score);
-            out.biglog(score,"green");
-            rl.prompt();
-        } else {
-            indice = Math.floor(Math.random() * toBeResolved.length);
-            id = toBeResolved[indice];
-            toBeResolved.splice(indice, 1);
-            quiz = model.getByIndex(id);
-            //.question(quiz.question + "?  ", respuesta => {
-            rl.question(`${out.colorize(quiz.question, 'red')} `, respuesta => {
-                if (respuesta.toLowerCase().trim() === quiz.answer.toLowerCase()) {
-                    score++;
-                    out.log("CORRECTO - Lleva "+ score + " aciertos");
-                    out.biglog(score,"green");
-                    playOne();
-                }
-                else {
-                    out.log("INCORRECTO - Fin del juego. Aciertos "+ score);
-                    out.biglog(score, "green");
+    exports.playCmd =rl=>{
+	
+	score = 0; 
+  	toBePlayed = []; 
 
-                }
-                rl.prompt();
-            });
+     
 
-        }
-    };
-    playOne();
-
+  		const playOne = () => {
+        return new Promise ((resolve, reject) => {
+  				if(toBePlayed.length === 0) {
+            out.log(' ¡No hay preguntas que responder!','yellow');
+            out.log(' Fin del examen. Aciertos: ');
+  					resolve();
+  					return;
+  				}
+  				id = Math.abs(Math.floor(Math.random()*toBePlayed.length));
+  				quiz = toBePlayed[id];
+  		    toBePlayed.splice(id, 1); 
+  		    makeQuestion(rl, quiz.question)
+  		    .then(answer => {
+            if(answer.toLowerCase().trim() === quiz.answer.toLowerCase().trim()){
+              score++;
+  				    out.log(`  CORRECTO - Lleva ${score} aciertos`);
+  				    resolve(playOne());
+            }else{
+              out.log('  INCORRECTO ');
+              out.log(`  Fin del juego. Aciertos: ${score} `);
+  				    resolve();
+  			    }
+  		    })
+  	     })
+  	  }
+  		model.models.quiz.findAll({raw: true}) 
+  		.then(quizzes => {
+  			toBePlayed= quizzes;
+      })
+  		.then(() => {
+  		 	return playOne(); 
+  		 })
+  		.catch(e => {
+  			console.log("Error:" + e); 
+  		})
+  		.then(() => {
+  			out.biglog(score, 'blue');
+  			rl.prompt();
+  	})
 };
 
 exports.deleteCmd = (rl,id) => {
@@ -175,5 +202,6 @@ exports.creditsCmd = rl => {
 	out.log('Pablo Lombao Díaz', 'green');
 	rl.prompt();
 };
+
 
 
