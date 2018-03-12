@@ -1,6 +1,7 @@
 
 const model = require('./model');
 const out= require("./out");
+const Sequelize=require('sequelize');
 
 
 
@@ -26,48 +27,73 @@ exports.quitCmd = rl => {
 	rl.prompt();
 };
 
-exports.addCmd = rl => {
-	rl.question(out.colorize(' Introduzca una pregunta: ', 'red'), question => {
-		rl.question(out.colorize(' Introduzca la respuesta: ', 'red'), answer => {
-			model.add(question, answer);
-			out.log(` ${out.colorize('Se ha añadido', 'magenta')}: ${question} ${out.colorize('=>', 'magenta')} ${answer}`);
-			rl.prompt();
+const makeQuestion=(rl,text)=>{
+	return new Sequelize.Promise((resolve,reject)=>{
+		rl.question(out.colorize(text,'red'),answer=>{
+			resolve(answer.trim())
 		});
-	 });
-	
-	
-	
-	
+	});
 };
 
-exports.listCmd = rl => {
-	
-	model.models.quiz.findAll()
-	.each(quiz => {
-		out.log(`  [${out.colorize(quiz.id, 'magenta')}]: ${quiz.question}`);	
+exports.addCmd = rl => {
+	makeQuestion(rl,'Introduzca una pregunta:')
+	.then(q=>{
+		return makeQuestion(rl,'Introduzca la respuesta: ')
+		.then(a=>{
+			return {question:q,answer:a};
+		});
 	})
-	.catch(error => {
+	.then(quiz=>{
+		return model.models.quiz.create(quiz);
+	})
+	.then((quiz)=>{
+		out.log(`${out.colorize(quiz.id,'magenta')}: ${quiz.question} ${out.colorize('=>','magenta')} ${quiz.answer}`);
+
+	})
+	.catch(Sequelize.ValidationError,error=>{
+		out.errorlog('El quiz es erroneo:');
+		error.errors.forEach((message)=>out.errorlog(message));
+	})
+	.catch(error=>{
 		out.errorlog(error.message);
 	})
-	.then(() => {
+	.then(()=>{
 		rl.prompt();
-		});
+	});
 };
-const validateId = id => {
-	return new Promise((resolve, reject) => {
-		if ( typeof id === "undefined") {
-			reject(new Error(`Falta el parámetro <id>.`));
-			} else {
-				id = parseInt(id);
-				if (Number.isNaN(id)) {
-					reject (new Error(`El parámetro <id> no es válido.`));
-				} else {
-					resolve(id);
-				}
+
+
+exports.listCmd = rl =>{
+	
+	model.models.quiz.findAll()
+	.each(quiz=>{
+			out.log(`[${out.colorize(quiz.id, 'magenta')}]: ${quiz.question}`);
+			})
+	
+.catch(error=>{
+	out.errorlog(error.message);
+})
+.then(()=>{
+	rl.prompt();
+})
+};
+
+
+const validateId=id=>{
+	return new Sequelize.Promise((resolve,reject)=>{
+		if(typeof id==="undefined"){
+			reject(new Error(`Falta el parametro <id>.`));
+
+		}else{
+			id=parseInt(id); //coger la parte entera y descartar lo demás
+			if(Number.isNaN(id)){
+				reject(new Error(`El valor del parametro <id> no es un número.`));
+			}else{
+				resolve(id);
 			}
-		});
-	};
-		
+		}
+	});
+};
 exports.testCmd = (rl,id) =>{
 validateId(id)
         .then(id => model.models.quiz.findById(id))
@@ -89,7 +115,7 @@ validateId(id)
         })
                .catch(Sequelize.ValidationError, error =>{
                    out.errorlog('El quiz es erróneo:');
-                    error.errors.forEach((message) => errorlog(message));
+                    error.errors.forEach((message) => out.errorlog(message));
                 })
                 .catch(error =>{
                     out.errorlog(error.message);
@@ -100,15 +126,6 @@ validateId(id)
 
 };
 
-exports.playCmd = rl => {
-	
-	 score = 0;
-
-    toBeResolved = []; 
-    
-    for (i = 0; i < model.getAll().length; i++) {
-        toBeResolved[i] = i;
-    }
 
     exports.playCmd =rl=>{
 	
@@ -158,45 +175,78 @@ exports.playCmd = rl => {
   	})
 };
 
-exports.deleteCmd = (rl,id) => {
-	if (typeof id === "undefined") {
-		out.errorlog(`Falta el parámetro id.`);
-	} else {
-		try {
-			model.deleteByIndex(id);
-	
-		} catch(error) {
-			out.errorlog(error.message);
-		}
-	}
-	
-	rl.prompt();
-};
 
-exports.editCmd = (rl,id) => {
-	if (typeof id === "undefined")  {
-		out.errorlog(`Falta el parámetro id.`);
+exports.showCmd = (rl,id)=>{
+	
+	validateId(id)
+	.then(id=>model.models.quiz.findById(id))
+	.then(quiz=>{
+		if(!quiz){
+			throw new Error(`No existe un quiz asociado al id=${id}.`);
+		}
+		out.log(`${out.colorize(quiz.id,'magenta')}: ${quiz.question} ${out.colorize('=>','magenta')} ${quiz.answer}`);
+	})
+	.catch(error=>{
+		out.errorlog(error.message);
+	})
+	.then(()=>{
 		rl.prompt();
-	} else {
-		try{
-			
-			const quiz = model.getByIndex(id);
-			process.stdout.isTTY && setTimeout(() => {rl.write(quiz.question)},0);
-			rl.question(out.colorize(' Introduzca una pregunta: ', 'red'), question => {
-				process.stdout.isTTY && setTimeout(() => {rl.write(quiz.answer)},0);
-				rl.question(out.colorize(' Introduzca la respuesta ', 'red'), answer => {
-					model.update(id, question, answer);
-					out.log(` Se ha cambiado el quiz ${out.colorize(id, 'magenta')} por: ${question} ${out.colorize('=>', 'magenta')} ${answer}`);
-					rl.prompt();
-				});
-			});
-		} catch(error) {
-			out.errorlog(error.message);
-			rl.prompt();
-		}
-	}
+
+	});
 };
 
+exports.deleteCmd =(rl,id)=>{
+	
+	validateId(id)
+	.then(id=>model.models.quiz.destroy({where:{id}}))
+	.catch(error=>{
+		out.errorlog(error.message);
+
+	})
+	.then(()=>{
+		rl.prompt();
+	});
+};
+
+exports.editCmd =(rl, id)=>{
+	
+	validateId(id)
+	.then(id=>model.models.quiz.findById(id))
+	.then(quiz=>{
+		if(!quiz){
+			throw new Error(`No existe un quiz asociado al id=${id}.`);
+		}
+		process.stdout.isTTY && setTimeout(()=>{rl.write(quiz.question)},0);
+		return makeQuestion(rl, 'Introduzca la pregunta:')
+		.then(q=>{
+			process.stdout.isTTY && setTimeout(()=>{rl.write(quiz.answer)},0);
+		return makeQuestion(rl, 'Introduzca la respuesta:')
+		.then(a=>{
+			quiz.question=q;
+			quiz.answer=a;
+			return quiz;
+		});
+
+		});
+	})
+	.then(quiz=>{
+		return quiz.save();
+	})
+	.then(quiz=>{
+		out.log(`${out.colorize(quiz.id,'magenta')}: ${quiz.question} ${out.colorize('=>','magenta')} ${quiz.answer}`);
+	})
+	 .catch(Sequelize.ValidationError, error => {
+            out.errorlog('El quiz es erroneo:');
+            error.errors.forEach((message) => out.errorlog(message));
+        })
+        .catch(error => {
+            out.errorlog(error.message);
+        })
+        .then(() => {
+            rl.prompt();
+        });
+	
+};
 exports.creditsCmd = rl => {
 	out.log('Autores de la práctica:');
 	out.log('Pablo Lombao Díaz', 'green');
